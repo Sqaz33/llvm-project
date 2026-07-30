@@ -8,8 +8,12 @@
 #include "llvm/IR/Function.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include "llvm/ADT/Statistic.h"
 
 using namespace llvm;
+
+#define DEBUG_TYPE "mydce"
+STATISTIC(DCEEliminated, "Number of instns removed");
 
 PreservedAnalyses MyDCEPath::run(Function &F,
                                  FunctionAnalysisManager &AM) {
@@ -41,7 +45,14 @@ PreservedAnalyses MyDCEPath::run(Function &F,
     }
 
     i->eraseFromParent();
+    ++DCEEliminated;
   }
 
-  return PreservedAnalyses::all();
+  if (DCEEliminated != 0) {
+    return PreservedAnalyses::all();
+  }
+
+  PreservedAnalyses PA;
+  PA.preserveSet<CFGAnalyses>();
+  return PA;
 }
