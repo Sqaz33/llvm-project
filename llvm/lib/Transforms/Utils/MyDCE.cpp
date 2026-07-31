@@ -1,8 +1,5 @@
 #include "llvm/Transforms/Utils/MyDCE.h"
 
-#include <iostream>
-#include <string>
-#include <vector>
 #include <list>
 
 #include "llvm/IR/Function.h"
@@ -17,13 +14,14 @@ STATISTIC(DCEEliminated, "Number of instns removed");
 
 PreservedAnalyses MyDCEPath::run(Function &F,
                                  FunctionAnalysisManager &AM) {
+  bool erasedInstr = false;
   std::list<Instruction*> instrs;
   auto* tli = &AM.getResult<TargetLibraryAnalysis>(F);
 
   for (BasicBlock& bb: F) {
-      for (Instruction& i : bb) {
-        if (i.use_empty() && isInstructionTriviallyDead(&i, tli)) {
-          instrs.push_back(&i);
+    for (Instruction& i : bb) {
+      if (isInstructionTriviallyDead(&i, tli)) {
+        instrs.push_back(&i);
       }
     }
   }
@@ -44,11 +42,12 @@ PreservedAnalyses MyDCEPath::run(Function &F,
       }
     }
 
+    erasedInstr = true;
     i->eraseFromParent();
     ++DCEEliminated;
   }
 
-  if (DCEEliminated != 0) {
+  if (!erasedInstr) {
     return PreservedAnalyses::all();
   }
 
