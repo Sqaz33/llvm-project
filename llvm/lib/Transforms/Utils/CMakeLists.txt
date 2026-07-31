@@ -35,6 +35,7 @@ add_llvm_component_library(LLVMTransformUtils
   GuardUtils.cpp
   HelloWorld.cpp
   MyDCE.cpp
+  MyUCE.cpp
   InlineFunction.cpp
   InjectTLIMappings.cpp
   InstructionNamer.cpp
@@ -109,5 +110,5 @@ add_llvm_component_library(LLVMTransformUtils
   Core
   ProfileData
   Support
-  TargetParser
+  TargetParser  
   )
