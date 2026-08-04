@@ -55,3 +55,4 @@ PreservedAnalyses MyDCEPath::run(Function &F,
   PA.preserveSet<CFGAnalyses>();
   return PA;
 }
+
