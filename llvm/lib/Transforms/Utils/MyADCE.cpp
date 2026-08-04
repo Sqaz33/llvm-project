@@ -5,6 +5,7 @@
 
 #include "llvm/IR/Function.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/CFG.h"
@@ -13,7 +14,7 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "myadce"
-STATISTIC(AUCEEliminated, "Number of instns removed");
+STATISTIC(ADCEEliminated, "Number of instns removed");
 
 
 namespace {
@@ -39,10 +40,11 @@ PreservedAnalyses MyADCEPath::run(Function &F,
                                  FunctionAnalysisManager &AM) {
   std::map<Instruction*, InstType> instTypes;
 
+  LLVM_DEBUG(dbgs() << "Function: " << F.getName() << "\n");
   for (auto&& bb : F) {
     for (auto&& i : bb) {
       instTypes[&i] = 
-        (i.mayHaveSideEffects() || i.isTerminator()) ? 
+        (i.mayHaveSideEffects() || i.isTerminator() || i.isEHPad()) ? 
           InstType::ALIVE : 
           InstType::UNVISITED;
     }
@@ -55,15 +57,38 @@ PreservedAnalyses MyADCEPath::run(Function &F,
   }
 
   for (auto&& [i, type] : instTypes) {
+    if (type == InstType::UNVISITED)
+      LLVM_DEBUG(dbgs() << "DEAD: " << *i << '\n');
+    else
+      LLVM_DEBUG(dbgs() << "LIVE: " << *i << '\n');
+  }
+
+  for (auto&& [i, type] : instTypes) {
     if (type == InstType::UNVISITED) {
       i->dropAllReferences();
     }
   }
 
+  bool removedInst = false;
+  bool removedBB = false;
+
   for (auto&& [i, type] : instTypes) {
     if (type == InstType::UNVISITED) {
+      removedInst = true;
       i->eraseFromParent();
+      ++ADCEEliminated;
     }
   }
 
+  if (removedBB) {
+    return PreservedAnalyses::none();
+  }
+
+  if (removedInst) {
+    PreservedAnalyses PA;
+    PA.preserveSet<CFGAnalyses>();
+    return PA;
+  }
+
+  return PreservedAnalyses::all();
 }
