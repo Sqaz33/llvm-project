@@ -37,6 +37,7 @@ add_llvm_component_library(LLVMTransformUtils
   MyDCE.cpp
   MyADCE.cpp
   MyUCE.cpp
+  MyGVN.cpp
   InlineFunction.cpp
   InjectTLIMappings.cpp
   InstructionNamer.cpp

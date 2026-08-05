@@ -366,6 +366,7 @@
 #include "llvm/Transforms/Utils/MyDCE.h"
 #include "llvm/Transforms/Utils/MyADCE.h"
 #include "llvm/Transforms/Utils/MyUCE.h"
+#include "llvm/Transforms/Utils/MyGVN.h"
 #include "llvm/Transforms/Utils/IRNormalizer.h"
 #include "llvm/Transforms/Utils/InjectTLIMappings.h"
 #include "llvm/Transforms/Utils/InstructionNamer.h"

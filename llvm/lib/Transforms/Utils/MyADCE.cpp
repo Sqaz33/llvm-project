@@ -1,7 +1,7 @@
 #include "llvm/Transforms/Utils/MyADCE.h"
 
 #include <map>
-#include <list>
+#include <set>
 
 #include "llvm/IR/Function.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -70,18 +70,14 @@ PreservedAnalyses MyADCEPath::run(Function &F,
   }
 
   bool removedInst = false;
-  bool removedBB = false;
 
+  // remove dead instrs
   for (auto&& [i, type] : instTypes) {
     if (type == InstType::UNVISITED) {
       removedInst = true;
       i->eraseFromParent();
       ++ADCEEliminated;
     }
-  }
-
-  if (removedBB) {
-    return PreservedAnalyses::none();
   }
 
   if (removedInst) {

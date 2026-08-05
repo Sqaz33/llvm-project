@@ -46,7 +46,7 @@ PreservedAnalyses MyDCEPath::run(Function &F,
     i->eraseFromParent();
     ++DCEEliminated;
   }
-
+  
   if (!erasedInstr) {
     return PreservedAnalyses::all();
   }
