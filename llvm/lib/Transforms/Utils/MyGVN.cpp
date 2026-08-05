@@ -225,10 +225,10 @@ PreservedAnalyses MyGVNPath::run(Function &F,
         }
       }
     }
+  }
 
-    for (auto* i : toErase) {
-      i->eraseFromParent();
-    }
+  for (auto* i : toErase) {
+    i->eraseFromParent();
   }
 
   if (!change) {
