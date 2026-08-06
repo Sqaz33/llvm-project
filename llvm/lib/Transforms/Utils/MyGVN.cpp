@@ -16,7 +16,8 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "mygvn"
-STATISTIC(GVNEliminated, "Number of instns removed");
+STATISTIC(GVNInstRemove, "Number of instns removed");
+STATISTIC(GVNRedundancyRemove, "Number of redundancy removed");
 
 namespace {
 
@@ -149,8 +150,6 @@ std::list<std::set<Value*>> partition(Function &F) {
     }
   }
 
-
-
   // пакеты по аргументам
   for (auto&& arg : F.args()) {
     partitions.emplace_front();
@@ -215,6 +214,7 @@ PreservedAnalyses MyGVNPath::run(Function &F,
             assert(xInst && yInst && "????");
             if (DT.dominates(xInst, yInst)) {
               yInst->replaceAllUsesWith(xInst);
+              ++GVNRedundancyRemove;
               toErase.push_back(yInst);
               valOpt[yInst] = true;
               change = true;
@@ -229,6 +229,7 @@ PreservedAnalyses MyGVNPath::run(Function &F,
 
   for (auto* i : toErase) {
     i->eraseFromParent();
+    ++GVNInstRemove;
   }
 
   if (!change) {
