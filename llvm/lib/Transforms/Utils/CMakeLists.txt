@@ -38,6 +38,8 @@ add_llvm_component_library(LLVMTransformUtils
   MyADCE.cpp
   MyUCE.cpp
   MyGVN.cpp
+  MCSTRPO.cpp
+  MCSTInstCount.cpp
   InlineFunction.cpp
   InjectTLIMappings.cpp
   InstructionNamer.cpp

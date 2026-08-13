@@ -365,6 +365,8 @@
 #include "llvm/Transforms/Utils/HelloWorld.h"
 #include "llvm/Transforms/Utils/MyDCE.h"
 #include "llvm/Transforms/Utils/MyADCE.h"
+#include "llvm/Transforms/Utils/MCSTRPO.h"
+#include "llvm/Transforms/Utils/MCSTInstCount.h"
 #include "llvm/Transforms/Utils/MyUCE.h"
 #include "llvm/Transforms/Utils/MyGVN.h"
 #include "llvm/Transforms/Utils/IRNormalizer.h"
