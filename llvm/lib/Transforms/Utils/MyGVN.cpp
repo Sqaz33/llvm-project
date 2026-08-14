@@ -93,7 +93,7 @@ bool sameClass(
   Value* b, 
   const std::map<Value*, std::set<Value*>*>& valToP)
 {
-  if (a == b) {
+  if (a == b) { // если константы
     return true;
   }
   
@@ -115,16 +115,19 @@ bool match(
   } 
 
   int opNum = i1->getNumOperands();
+  // llvm считает phi не коммутатинвной операцией
   bool unorderedOperands = i1->isCommutative() || isa<PHINode>(i1);
 
-  if (!unorderedOperands) {
+  if (!unorderedOperands) { 
     for (int i = 0; i < opNum; ++i) {
       if (!sameClass(i1->getOperand(i), i2->getOperand(i), valToP)) {
         return false;
       }
     }
-  } else {
-    // TODO: протестить
+  } else { 
+    // для каждого операнда из i1 должен найтись операнд i2 
+    // такой, что sameclass(i, j) и sameinbb(i, j) если phi
+    // при этом все пары {i, j} должны содержать уникальные операнды
     auto* phi1 = dyn_cast<PHINode>(i1);
     auto* phi2 = dyn_cast<PHINode>(i2);
     std::vector<bool> hasSameClassIn2(opNum, false);
@@ -163,7 +166,7 @@ split(
   }
 
   auto* I = *partition.begin();
-  std::set<Value*> packetI, packetNonI;
+  std::set<Value*> packetI, packetNonI; // бить пакет на I и неI
   packetI.insert(I);
 
   auto* IInst = dyn_cast<Instruction>(I);
@@ -181,7 +184,9 @@ split(
   return std::make_pair(packetI, packetNonI);
 }
 
-
+// лист пакетов с конгруэнтными значениями
+// все значения из одного пакета имеют соответствующие операнды,
+// тоже находящиеся в одном пакете 
 std::list<std::set<Value*>> partition(Function &F) {
   std::list<std::set<Value*>> partitions;
   std::map<Value*, std::set<Value*>*> valToP;
@@ -196,10 +201,12 @@ std::list<std::set<Value*>> partition(Function &F) {
       }
 
       std::set<Value*>* curP = nullptr;
+      // найти класс для инстукции
       for (auto&& p : partitions) {
         if (auto inst = dyn_cast<Instruction>(*p.begin())) {
           auto* instPhi = dyn_cast<PHINode>(inst);
           auto* iPhi = dyn_cast<PHINode>(&i);
+          // один синтаксис, один тип, один опкод
           if (inst->isSameOperationAs(&i) &&
               inst->hasSameSubclassOptionalData(&i) &&
             (!iPhi || instPhi->getParent() == iPhi->getParent())) 
@@ -221,13 +228,14 @@ std::list<std::set<Value*>> partition(Function &F) {
     }
   }
 
-  // пакеты для аргументов
+  // вставить пакеты для аргументов
   for (auto&& arg : F.args()) {
     partitions.emplace_front();
     partitions.front().insert(dyn_cast<Value>(&arg));
     valToP[&arg] = &partitions.front();
   }
 
+  // разбивать пакеты, пока возможно
   bool change = true;
   while (change) {
     change = false;
@@ -270,11 +278,12 @@ PreservedAnalyses MyGVNPath::run(Function &F,
       continue;
     }
 
+    // заменить юзы каждого значения из пакета
+    // соответствующим доминирующим значением
     std::map<Value*, bool> valOpt;
     for (auto* i : p) {
       valOpt[i] = false;
     }
-
     std::vector pVector(p.begin(), p.end());
     for (int i = 0; i < pVector.size() - 1; ++i) {
       for (int j = i + 1; j < pVector.size(); ++j) {
@@ -294,7 +303,7 @@ PreservedAnalyses MyGVNPath::run(Function &F,
           if (auto* xPhi = dyn_cast<PHINode>(xInst)) {
             auto* yPhi = cast<PHINode>(yInst);
             // поэтому эта проверка
-            // т.к. phi в начале бб исполняются одновременно
+            // т.к. phi в начале бб вычисляются одновременно
             canReplace = xPhi->getParent() == yPhi->getParent();
           }
 
