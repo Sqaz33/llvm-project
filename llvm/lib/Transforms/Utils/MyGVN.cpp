@@ -135,6 +135,7 @@ split(
   return std::make_pair(packetI, packetNonI);
 }
 
+
 std::list<std::set<Value*>> partition(Function &F) {
   std::list<std::set<Value*>> partitions;
   std::map<Value*, std::set<Value*>*> valToP;
@@ -152,7 +153,8 @@ std::list<std::set<Value*>> partition(Function &F) {
         if (auto inst = dyn_cast<Instruction>(*p.begin())) {
           auto* instPhi = dyn_cast<PHINode>(inst);
           auto* iPhi = dyn_cast<PHINode>(&i);
-          if (inst->isSameOperationAs(&i) && 
+          if (inst->isSameOperationAs(&i) &&
+              inst->hasSameSubclassOptionalData(&i) &&
             (!iPhi || instPhi->getParent() == iPhi->getParent())) 
           {
             curP = &p;
@@ -238,7 +240,19 @@ PreservedAnalyses MyGVNPath::run(Function &F,
           auto* xInst = dyn_cast<Instruction>(pVector[x]);
           auto* yInst = dyn_cast<Instruction>(pVector[y]);
           assert(xInst && yInst && "????");
-          if (DT.dominates(xInst, yInst)) {
+
+          // особенность api llvm
+          // один phi может не доминировать над другим в одном бб, 
+          // даже если объявлен раньше
+          bool canReplace = DT.dominates(xInst, yInst);
+          if (auto* xPhi = dyn_cast<PHINode>(xInst)) {
+            auto* yPhi = cast<PHINode>(yInst);
+            // поэтому эта проверка
+            // т.к. phi в начале бб исполняются одновременно
+            canReplace = xPhi->getParent() == yPhi->getParent();
+          }
+
+          if (canReplace) {
             yInst->replaceAllUsesWith(xInst);
             ++GVNRedundancyRemove;
             toErase.push_back(yInst);
