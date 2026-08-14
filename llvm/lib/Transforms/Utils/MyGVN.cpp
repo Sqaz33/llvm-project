@@ -34,7 +34,8 @@ bool isGVNCandidate(const Instruction& i) {
          isa<CmpInst>(i) ||
          isa<CastInst>(i) ||
          isa<SelectInst>(i) ||
-         isa<GetElementPtrInst>(i);
+         isa<GetElementPtrInst>(i) ||
+         isa<PHINode>(i);
 }
 
 } // namespace
@@ -65,22 +66,41 @@ bool match(
 {
   if (i1->getNumOperands() != i2->getNumOperands()) {
       return false;
-  }        
+  } 
 
-  std::vector<Value*> ops1(i1->operands().begin(), i1->operands().end()), 
-                      ops2(i2->operands().begin(), i2->operands().end());
+  int opNum = i1->getNumOperands();
+  bool unorderedOperands = i1->isCommutative() || isa<PHINode>(i1);
 
-  if (i1->getNumOperands() == 2 && i1->isCommutative()) {
-    bool dir = sameClass(i1->getOperand(0), i2->getOperand(0), valToP) && 
-               sameClass(i1->getOperand(1), i2->getOperand(1), valToP);
-    bool sw = sameClass(i1->getOperand(0), i2->getOperand(1), valToP) && 
-              sameClass(i1->getOperand(1), i2->getOperand(0), valToP); 
-    return dir || sw;
-  }
-
-  for (int i = 0; i < ops1.size(); ++i) {
-    if (!sameClass(i1->getOperand(i), i2->getOperand(i), valToP)) {
-      return false;
+  if (!unorderedOperands) {
+    for (int i = 0; i < opNum; ++i) {
+      if (!sameClass(i1->getOperand(i), i2->getOperand(i), valToP)) {
+        return false;
+      }
+    }
+  } else {
+    // TODO: протестить
+    auto* phi1 = dyn_cast<PHINode>(i1);
+    auto* phi2 = dyn_cast<PHINode>(i2);
+    std::vector<bool> hasSameClassIn2(opNum, false);
+    for (int i = 0; i < opNum; ++i) {
+      bool findSameClass = false;
+      for (int j = 0; j < opNum; ++j) {
+        if (hasSameClassIn2[j]) {
+          continue;
+        }
+        bool isSameClass = sameClass(
+          i1->getOperand(i), i2->getOperand(j), valToP);
+        bool isSameInBB = !phi1 || 
+          phi1->getIncomingBlock(i) == phi2->getIncomingBlock(j);
+        hasSameClassIn2[j] = isSameClass && isSameInBB;
+        findSameClass = isSameClass && isSameInBB;
+        if (findSameClass) {
+          break;
+        }
+      }
+      if (!findSameClass) {
+        return false;
+      }
     }
   }
 
@@ -130,13 +150,15 @@ std::list<std::set<Value*>> partition(Function &F) {
       std::set<Value*>* curP = nullptr;
       for (auto&& p : partitions) {
         if (auto inst = dyn_cast<Instruction>(*p.begin())) {
-          if (inst->isSameOperationAs(&i)) {
+          auto* instPhi = dyn_cast<PHINode>(inst);
+          auto* iPhi = dyn_cast<PHINode>(&i);
+          if (inst->isSameOperationAs(&i) && 
+            (!iPhi || instPhi->getParent() == iPhi->getParent())) 
+          {
             curP = &p;
             break;
           }
-        } else {
-          continue;
-        }
+        } 
       }
 
       if (curP != nullptr) {
@@ -196,33 +218,37 @@ PreservedAnalyses MyGVNPath::run(Function &F,
   std::vector<Instruction*> toErase;
 
   for (auto&& p : partitions) {
-    if (p.size() > 1) {
-      std::map<Value*, bool> valOpt;
-      for (auto* i : p) {
-        valOpt[i] = false;
-      }
+    if (p.size() <= 1) {
+      continue;
+    }
 
-      std::vector pVector(p.begin(), p.end());
-      for (int i = 0; i < pVector.size() - 1; ++i) {
-        for (int j = i + 1; j < pVector.size(); ++j) {
-          auto&& opt = [&] (int x, int y) {
-            if (valOpt[pVector[x]] || valOpt[pVector[y]]) {
-              return;
-            } 
-            auto* xInst = dyn_cast<Instruction>(pVector[x]);
-            auto* yInst = dyn_cast<Instruction>(pVector[y]);
-            assert(xInst && yInst && "????");
-            if (DT.dominates(xInst, yInst)) {
-              yInst->replaceAllUsesWith(xInst);
-              ++GVNRedundancyRemove;
-              toErase.push_back(yInst);
-              valOpt[yInst] = true;
-              change = true;
-            }
-          };
-          opt(i, j);
-          opt(j, i);
-        }
+    std::map<Value*, bool> valOpt;
+    for (auto* i : p) {
+      valOpt[i] = false;
+    }
+
+    std::vector pVector(p.begin(), p.end());
+    for (int i = 0; i < pVector.size() - 1; ++i) {
+      for (int j = i + 1; j < pVector.size(); ++j) {
+
+        auto&& opt = [&] (int x, int y) {
+          if (valOpt[pVector[x]] || valOpt[pVector[y]]) {
+            return;
+          } 
+          auto* xInst = dyn_cast<Instruction>(pVector[x]);
+          auto* yInst = dyn_cast<Instruction>(pVector[y]);
+          assert(xInst && yInst && "????");
+          if (DT.dominates(xInst, yInst)) {
+            yInst->replaceAllUsesWith(xInst);
+            ++GVNRedundancyRemove;
+            toErase.push_back(yInst);
+            valOpt[yInst] = true;
+            change = true;
+          }
+        };
+
+        opt(i, j);
+        opt(j, i);
       }
     }
   }
