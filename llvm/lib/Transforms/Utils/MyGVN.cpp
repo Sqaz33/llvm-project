@@ -1,3 +1,49 @@
+//===----------------------------------------------------------------------===//
+// MyGVN — устранение полной избыточности выражений
+//===----------------------------------------------------------------------===//
+//
+// Проход строит классы конгруэнтности для чистых SSA-выражений. Две
+// инструкции попадают в один класс, если они выполняют одну операцию с
+// одинаковыми типами и semantic flags, а их операнды принадлежат одним
+// классам конгруэнтности. Для коммутативных операций порядок операндов не
+// важен.
+//
+// После стабилизации разбиения проход удаляет инструкцию Y, если в том же
+// классе существует инструкция X, которая доминирует Y. Все использования Y
+// заменяются на X:
+//
+//                 entry
+//                /     \
+//              left   right
+//
+//   entry:                         entry:
+//     %x = add i32 %a, %b            %x = add i32 %a, %b
+//     br i1 %cond,                  br i1 %cond,
+//        label %left, ...     =>       label %left, ...
+//
+//   left:                          left:
+//     %y = add i32 %a, %b            call void @use(i32 %x)
+//     call void @use(i32 %y)
+//
+// `%x` и `%y` вычисляют одно выражение, а `entry` доминирует `left`, поэтому
+// на любом пути к `%y` значение `%x` уже вычислено. Выражения из sibling
+// blocks не заменяют друг друга, поскольку ни одно из них не доминирует
+// другое.
+//
+// PHI-узлы обрабатываются отдельно:
+//   * сравниваются только PHI одного basic block;
+//   * сравниваются пары (incoming block, класс incoming value);
+//   * порядок записей PHI не важен;
+//   * эквивалентные PHI одного блока можно заменить друг другом, хотя API
+//     DominatorTree не считает одну PHI доминирующей над другой PHI в том же
+//     блоке: все PHI концептуально вычисляются одновременно на входе в блок.
+//
+// Поддерживаются только безопасно удаляемые инструкции без чтения и записи
+// памяти: BinaryOperator, CmpInst, CastInst, SelectInst, GetElementPtrInst и
+// PHINode. Проход не выполняет memory value numbering, PRE или code motion.
+//
+//===----------------------------------------------------------------------===//
+
 #include "llvm/Transforms/Utils/MyGVN.h"
 
 #include <set>
@@ -141,7 +187,8 @@ std::list<std::set<Value*>> partition(Function &F) {
   std::map<Value*, std::set<Value*>*> valToP;
 
   // начальные пакеты
-  // пакеты по типу операции
+  // пакеты по опкоду, типу, дополнительной семантике
+
   for (auto&& bb : F) {
     for (auto&& i : bb) {
       if (!isGVNCandidate(i)) {
@@ -174,7 +221,7 @@ std::list<std::set<Value*>> partition(Function &F) {
     }
   }
 
-  // пакеты по аргументам
+  // пакеты для аргументов
   for (auto&& arg : F.args()) {
     partitions.emplace_front();
     partitions.front().insert(dyn_cast<Value>(&arg));
@@ -209,7 +256,6 @@ std::list<std::set<Value*>> partition(Function &F) {
 
 } // namespace analise
 
-// устранение полной избыточности
 PreservedAnalyses MyGVNPath::run(Function &F,
                                  FunctionAnalysisManager &AM) {
   auto partitions = analise::partition(F);
