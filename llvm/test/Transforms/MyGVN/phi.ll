@@ -135,7 +135,7 @@ define i32 @cross_recursive(i1 %exit) {
 define i32 @repeated_switch_edges(i32 %selector) {
 ; CHECK-LABEL: define i32 @repeated_switch_edges(
 ; CHECK:       join:
-; CHECK-NEXT:    [[P:%.*]] = phi i32 [ 10, %entry ], [ 30, %other ], [ 10, %entry ]
+; CHECK-NEXT:    [[P:%.*]] = phi i32 [ 10, %entry ], [ 10, %entry ], [ 30, %other ]
 ; CHECK-NEXT:    [[SUM:%.*]] = add i32 [[P]], [[P]]
   entry:
     switch i32 %selector, label %other [

@@ -1,6 +1,7 @@
 //===----------------------------------------------------------------------===//
 // MyGVN — устранение полной избыточности выражений
 //===----------------------------------------------------------------------===//
+// LLVM version 23.0.0
 //
 // Проход строит классы конгруэнтности для чистых SSA-выражений. Две
 // инструкции попадают в один класс, если они выполняют одну операцию с
@@ -168,7 +169,7 @@ private:
       SmallVector<CongruencePackage, 16> NewPartition;
       for (auto&& Package : Partition) {
         auto [MatchingMembers, RemainingMembers] = splitPackage(Package);
-        if (!MatchingMembers.Members.empty()) {
+        if (!RemainingMembers.Members.empty()) {
           Changed = true;
           // обновить отображение значения на пакет
           auto&& refreshValueToPackage = [&](auto&& NewPackage) { 
@@ -179,7 +180,9 @@ private:
           };
           refreshValueToPackage(MatchingMembers);
           refreshValueToPackage(RemainingMembers);
-        } 
+        } else {
+          NewPartition.push_back(std::move(Package));
+        }
       }
       Partition.swap(NewPartition);
     } 
@@ -294,7 +297,11 @@ private:
 
     int OpNum = LHS->getNumOperands();
     // llvm не считает phi коммутатинвной операцией
-    bool unorderedOperands = LHS->isCommutative() || isa<PHINode>(LHS);
+    auto* ICMPLHS = dyn_cast<ICmpInst>(LHS);
+    bool unorderedOperands = LHS->isCommutative() || 
+                             isa<PHINode>(LHS) || 
+                             // проверка для icmp с предикатами eq и ne
+                             (ICMPLHS && ICMPLHS->isCommutative());
 
     if (!unorderedOperands) { 
       for (int i = 0; i < OpNum; ++i) {
@@ -310,22 +317,22 @@ private:
       auto* PHIRHS = dyn_cast<PHINode>(RHS);
       SmallBitVector HasSameClassInRHS(OpNum, false);
       for (int i = 0; i < OpNum; ++i) {
-        bool FindSameClass = false;
+        bool FoundSameClass = false;
         for (int j = 0; j < OpNum; ++j) {
           if (HasSameClassInRHS[j]) {
             continue;
           }
           bool IsSameClass = areInSamePackage(
             LHS->getOperand(i), RHS->getOperand(j));
-          bool IsSameInBB = PHILHS || 
+          bool IsSameInBB = !PHILHS || 
             PHILHS->getIncomingBlock(i) == PHIRHS->getIncomingBlock(j);
           HasSameClassInRHS[j] = IsSameClass && IsSameInBB;
-          FindSameClass = IsSameClass && IsSameInBB;
-          if (FindSameClass) {
+          FoundSameClass = IsSameClass && IsSameInBB;
+          if (FoundSameClass) {
             break;
           }
         }
-        if (FindSameClass) {
+        if (!FoundSameClass) {
           return false;
         }
       }
@@ -336,256 +343,6 @@ private:
 };
 
 } // namespace
-
-// namespace analyse {
-
-// bool sameClass(
-//   Value* a, 
-//   Value* b, 
-//   const std::map<Value*, std::set<Value*>*>& valToP)
-// {
-//   if (a == b) { // если константы
-//     return true;
-//   }
-  
-//   auto aIt = valToP.find(a);
-//   auto bIt = valToP.find(b);
-  
-//   return aIt != valToP.end() && 
-//          bIt != valToP.end() && 
-//          aIt->second == bIt->second;
-// }
-
-// bool match( 
-//   const std::map<Value*, std::set<Value*>*>& valToP,
-//   const Instruction* i1, 
-//   const Instruction* i2)
-// {
-//   if (i1->getNumOperands() != i2->getNumOperands()) {
-//       return false;
-//   } 
-
-//   int opNum = i1->getNumOperands();
-//   // llvm не считает phi коммутатинвной операцией
-//   bool unorderedOperands = i1->isCommutative() || isa<PHINode>(i1);
-
-//   if (!unorderedOperands) { 
-//     for (int i = 0; i < opNum; ++i) {
-//       if (!sameClass(i1->getOperand(i), i2->getOperand(i), valToP)) {
-//         return false;
-//       }
-//     }
-//   } else { 
-//     // для каждого операнда из i1 должен найтись операнд i2 
-//     // такой, что sameclass(i, j) и sameinbb(i, j) если phi
-//     // при этом все пары {i, j} должны содержать уникальные операнды
-//     auto* phi1 = dyn_cast<PHINode>(i1);
-//     auto* phi2 = dyn_cast<PHINode>(i2);
-//     std::vector<bool> hasSameClassIn2(opNum, false);
-//     for (int i = 0; i < opNum; ++i) {
-//       bool findSameClass = false;
-//       for (int j = 0; j < opNum; ++j) {
-//         if (hasSameClassIn2[j]) {
-//           continue;
-//         }
-//         bool isSameClass = sameClass(
-//           i1->getOperand(i), i2->getOperand(j), valToP);
-//         bool isSameInBB = !phi1 || 
-//           phi1->getIncomingBlock(i) == phi2->getIncomingBlock(j);
-//         hasSameClassIn2[j] = isSameClass && isSameInBB;
-//         findSameClass = isSameClass && isSameInBB;
-//         if (findSameClass) {
-//           break;
-//         }
-//       }
-//       if (!findSameClass) {
-//         return false;
-//       }
-//     }
-//   }
-
-//   return true;
-// }
-
-// std::pair<std::set<Value*>, std::set<Value*>> 
-// split(
-//     const std::set<Value*>& partition, 
-//     const std::map<Value*, std::set<Value*>*>& valToP) 
-// {
-//   if (partition.size() <= 1) {
-//     return std::pair<std::set<Value*>, std::set<Value*>>(partition, {});
-//   }
-
-//   auto* I = *partition.begin();
-//   std::set<Value*> packetI, packetNonI; // бить пакет на I и неI
-//   packetI.insert(I);
-
-//   auto* IInst = dyn_cast<Instruction>(I);
-//   assert(IInst && "????");
-//   for (auto&& J : partition) {
-//     auto* JInst = dyn_cast<Instruction>(J);
-//     assert(JInst && "????");
-//     if (match(valToP, IInst, JInst)) {
-//       packetI.insert(J);
-//     } else {
-//       packetNonI.insert(J);
-//     }
-//   }
-
-//   return std::make_pair(packetI, packetNonI);
-// }
-
-// // лист пакетов с конгруэнтными значениями
-// // все значения из одного пакета имеют соответствующие операнды,
-// // тоже находящиеся в одном пакете 
-// std::list<std::set<Value*>> partition(Function &F) {
-//   std::list<std::set<Value*>> partitions;
-//   std::map<Value*, std::set<Value*>*> valToP;
-
-//   // начальные пакеты
-//   // пакеты по опкоду, типу, дополнительной семантике
-
-//   for (auto&& bb : F) {
-//     for (auto&& i : bb) {
-//       if (!isGVNCandidate(i)) {
-//         continue;
-//       }
-
-//       std::set<Value*>* curP = nullptr;
-//       // найти класс для инстукции
-//       for (auto&& p : partitions) {
-//         if (auto inst = dyn_cast<Instruction>(*p.begin())) {
-//           auto* instPhi = dyn_cast<PHINode>(inst);
-//           auto* iPhi = dyn_cast<PHINode>(&i);
-//           // один синтаксис, один тип, один опкод, один бб у phi
-//           if (inst->isSameOperationAs(&i) &&
-//               inst->hasSameSubclassOptionalData(&i) &&
-//             (!iPhi || instPhi->getParent() == iPhi->getParent())) 
-//           {
-//             curP = &p;
-//             break;
-//           }
-//         } 
-//       }
-
-//       if (curP != nullptr) {
-//         curP->insert(&i);
-//         valToP[&i] = curP;
-//       } else {
-//         partitions.emplace_front();
-//         partitions.front().insert(&i);
-//         valToP[&i] = &partitions.front();
-//       }
-//     }
-//   }
-
-//   // вставить пакеты для аргументов
-//   for (auto&& arg : F.args()) {
-//     partitions.emplace_front();
-//     partitions.front().insert(dyn_cast<Value>(&arg));
-//     valToP[&arg] = &partitions.front();
-//   }
-
-//   // разбивать пакеты, пока возможно
-//   bool change = true;
-//   while (change) {
-//     change = false;
-//     for (auto it = partitions.begin(); it != partitions.end();) {
-//       auto [packetI, packetNonI] = split(*it, valToP);
-//       if (!packetNonI.empty()) {
-//         change = true;
-//         // обновить отображение инструкции на пакет
-//         auto&& refreshValToP = [&](auto&& p) { 
-//           partitions.push_front(std::move(p));
-//           for (auto* i : partitions.front()) {
-//             valToP[i] = &partitions.front();
-//           }
-//         };
-//         refreshValToP(packetI);
-//         refreshValToP(packetNonI);
-//         it = partitions.erase(it);
-//       } else {
-//         ++it;
-//       }
-//     }
-//   } 
-
-//   return partitions;
-// } 
-
-// } // namespace analyse
-
-// PreservedAnalyses MyGVNPath::run(Function &F,
-//                                  FunctionAnalysisManager &AM) {
-//   auto partitions = analyse::partition(F);
-
-//   auto&& DT = AM.getResult<DominatorTreeAnalysis>(F);
-
-//   bool change = false;
-//   std::vector<Instruction*> toErase;
-
-//   for (auto&& p : partitions) {
-//     if (p.size() <= 1) {
-//       continue;
-//     }
-
-//     // заменить юзы каждого значения из пакета
-//     // соответствующим доминирующим значением
-//     std::map<Value*, bool> valOpt;
-//     for (auto* i : p) {
-//       valOpt[i] = false;
-//     }
-//     std::vector pVector(p.begin(), p.end());
-//     for (int i = 0; i < pVector.size() - 1; ++i) {
-//       for (int j = i + 1; j < pVector.size(); ++j) {
-
-//         auto&& opt = [&] (int x, int y) {
-//           if (valOpt[pVector[x]] || valOpt[pVector[y]]) {
-//             return;
-//           } 
-//           auto* xInst = dyn_cast<Instruction>(pVector[x]);
-//           auto* yInst = dyn_cast<Instruction>(pVector[y]);
-//           assert(xInst && yInst && "????");
-
-//           // особенность api llvm
-//           // один phi может не доминировать над другим в одном бб, 
-//           // даже если объявлен раньше
-//           bool canReplace = DT.dominates(xInst, yInst);
-//           if (auto* xPhi = dyn_cast<PHINode>(xInst)) {
-//             auto* yPhi = cast<PHINode>(yInst);
-//             // поэтому эта проверка
-//             // т.к. phi в начале бб вычисляются одновременно
-//             canReplace = xPhi->getParent() == yPhi->getParent();
-//           }
-
-//           if (canReplace) {
-//             yInst->replaceAllUsesWith(xInst);
-//             ++GVNRedundancyRemove;
-//             toErase.push_back(yInst);
-//             valOpt[yInst] = true;
-//             change = true;
-//           }
-//         };
-
-//         opt(i, j);
-//         opt(j, i);
-//       }
-//     }
-//   }
-
-//   for (auto* i : toErase) {
-//     i->eraseFromParent();
-//     ++GVNInstRemove;
-//   }
-
-//   if (!change) {
-//     return PreservedAnalyses::all();
-//   }
-
-//   PreservedAnalyses PA;
-//   PA.preserveSet<CFGAnalyses>();
-//   return PA;
-// }
 
 PreservedAnalyses MyGVNPath::run(Function &F,
                                  FunctionAnalysisManager &AM) {
